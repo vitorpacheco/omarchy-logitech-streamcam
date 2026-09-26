@@ -33,7 +33,7 @@ Ui.Panel {
   function request(action, name, value) {
     if (worker.running) return
     error = ""
-    var args = ["python3", root.helperPath, action]
+    var args = ["/usr/bin/python3", "-I", root.helperPath, action]
     if (selectedDevice) args.push("--device", selectedDevice)
     if (action === "set") args.push("--control", name, "--value", String(value))
     worker.command = args
@@ -55,6 +55,8 @@ Ui.Panel {
 
   Process {
     id: worker
+    clearEnvironment: true
+    environment: ({ PATH: "/usr/bin", LANG: i18n.language === "pt" ? "pt_BR.UTF-8" : "C.UTF-8", LC_ALL: i18n.language === "pt" ? "pt_BR.UTF-8" : "C.UTF-8" })
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {

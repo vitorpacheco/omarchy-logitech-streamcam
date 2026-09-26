@@ -12,14 +12,13 @@ Live preview additionally requires **qt6-multimedia** and **qt6-multimedia-ffmpe
 omarchy pkg add v4l-utils python
 # Optional live preview dependencies:
 omarchy pkg add qt6-multimedia qt6-multimedia-ffmpeg
-./install-local.sh
+omarchy plugin add https://github.com/vitorpacheco/omarchy-logitech-streamcam.git --enable
 ```
 
-The installer copies the plugin to `${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/plugins/io.github.vitorpacheco.streamcam`, rescans plugins, and enables the widget in the right bar section. It refuses to overwrite an existing installation. To reinstall, remove the plugin through Omarchy and run the installer again. The installed copy is independent of this source repository.
-
-Once the repository is published, it can also be installed with `omarchy plugin add <repository-git-url> --enable`. No hooks install dependencies automatically.
+Installation, updates, and removal use the native Omarchy plugin manager. The plugin has no custom installer, installation hooks, or automatic dependency installation. Installing system packages may require administrator authentication; runtime camera access uses your existing session permissions.
 
 ```bash
+omarchy plugin update io.github.vitorpacheco.streamcam
 omarchy bar move io.github.vitorpacheco.streamcam --section right
 omarchy-shell shell summon io.github.vitorpacheco.streamcam '{}'
 omarchy-shell shell hide io.github.vitorpacheco.streamcam
@@ -31,16 +30,16 @@ omarchy plugin remove io.github.vitorpacheco.streamcam
 
 The plugin automatically selects **English** or **Portuguese** from the system message locale. It uses the first nonempty variable in this order: **`LC_ALL` → `LC_MESSAGES` → `LANG`**. Portuguese locales such as `pt`, `pt_BR.UTF-8`, and `pt_PT.UTF-8` select Portuguese; English, unsupported locales, `C`/`POSIX`, and an unset locale use English.
 
-A missing Portuguese translation also falls back to English. The interface, control labels, known menu options, helper messages, and installer share `translations.json`. Internal category IDs remain independent of their translated labels. Driver diagnostics, raw video-format output, and unknown driver-provided labels remain in their original language; V4L2 output is deliberately queried in the C locale for reliable parsing. Static manifest metadata is English.
+A missing Portuguese translation also falls back to English. The interface, control labels, known menu options, and helper messages share `translations.json`. Internal category IDs remain independent of their translated labels. Driver diagnostics, raw video-format output, and unknown driver-provided labels remain in their original language; V4L2 output is deliberately queried in the C locale for reliable parsing. Static manifest metadata is English.
 
 The interface uses the environment inherited by the Omarchy shell. After changing your system language, restart the shell or log in again. Setting a locale only on an `omarchy-shell` IPC command does not change the running shell's environment.
 
 You can check helper localization without changing the system language:
 
 ```bash
-LC_ALL=pt_BR.UTF-8 python3 backend/streamcam.py inspect
-LC_ALL=en_US.UTF-8 python3 backend/streamcam.py inspect
-LC_ALL=de_DE.UTF-8 python3 backend/streamcam.py inspect  # English fallback
+LC_ALL=pt_BR.UTF-8 /usr/bin/python3 -I backend/streamcam.py inspect
+LC_ALL=en_US.UTF-8 /usr/bin/python3 -I backend/streamcam.py inspect
+LC_ALL=de_DE.UTF-8 /usr/bin/python3 -I backend/streamcam.py inspect  # English fallback
 ```
 
 ## Usage
@@ -74,19 +73,22 @@ Full control ranges, Logitech/kernel sources, and research details are recorded 
 ## Diagnostics and development
 
 ```bash
-python3 backend/streamcam.py inspect
-python3 backend/streamcam.py formats
+/usr/bin/python3 -I backend/streamcam.py inspect
+/usr/bin/python3 -I backend/streamcam.py formats
 # This command changes the camera's brightness:
-python3 backend/streamcam.py set --device /dev/video0 --control brightness --value 128
+/usr/bin/python3 -I backend/streamcam.py set --device /dev/video0 --control brightness --value 128
 python3 -m unittest discover -s tests -v
 omarchy plugin validate .
 qmllint -I /usr/share/omarchy/shell Widget.qml ControlRow.qml Preview.qml I18n.qml
-shellcheck install-local.sh
 # Isolated visual test: opens the camera briefly.
 python3 tests/smoke.py --preview
 ```
 
-`inspect` and `formats` are read-only. The helper outputs JSON; operation failures return `ok: false` and exit status 1. Unsupported ranges, steps, and menu options are rejected before writing. Each V4L2 call uses separate arguments, no shell, and an eight-second timeout.
+`inspect` and `formats` are read-only. The helper outputs JSON; operation failures return `ok: false` and exit status 1. Unsupported ranges, steps, and menu options are rejected before writing. Each V4L2 call uses separate arguments and no shell. It has an eight-second deadline, bounded stdout (256 KiB) and stderr (16 KiB), and process-group cleanup on success or failure. Cleanup sends TERM, waits at most 100 ms before KILL, and reaps the leader only after signaling the group. The helper has a 20-second request budget for V4L2 calls.
+
+The QML worker runs `/usr/bin/python3 -I` with a cleared environment containing only a fixed `PATH` and the selected locale. It loads helper modules by their exact plugin-relative paths. The backend resolves only `/usr/bin/v4l2-ctl`, verifies that the resolved executable and its ancestor directories are root-owned and not group/other-writable, and executes that exact path with only `PATH=/usr/bin`, `LANG=C`, and `LC_ALL=C`. No inherited Python or loader variables reach either child process.
+
+Responses are limited to 128 controls, 64 options per control, 512-character control lines/device fields, 32 device nodes, 64 stable-path candidates per node, eight diagnostics of at most 1,024 characters each, and 512 KiB of serialized JSON. Oversized control responses fail with a translated error instead of silently applying a partial control definition.
 
 The smoke test requires a Wayland session and a connected StreamCam. It runs a temporary Quickshell instance without installing the plugin or changing `shell.json`. Omit `--preview` to test only control reads and panel lifecycle. See the [validation record](docs/validation.md) (Portuguese).
 

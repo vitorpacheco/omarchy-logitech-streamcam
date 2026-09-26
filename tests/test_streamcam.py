@@ -69,18 +69,17 @@ class CameraTests(unittest.TestCase):
 
     def test_timeout_missing_tool_and_driver_failure(self):
         for failure in [FileNotFoundError(), subprocess.TimeoutExpired("v4l2-ctl", 8)]:
-            with patch.object(camera.subprocess, "run", side_effect=failure):
+            with patch.object(camera, "run_bounded", side_effect=failure):
                 with self.assertRaises(camera.CameraError):
                     camera.v4l2("/dev/video0", "--info")
-        with patch.object(camera.subprocess, "run", return_value=subprocess.CompletedProcess([], 1, "", "Permission denied")):
+        with patch.object(camera, "run_bounded", return_value=subprocess.CompletedProcess([], 1, "", "Permission denied")):
             with self.assertRaisesRegex(camera.CameraError, "Permission denied"):
                 camera.v4l2("/dev/video0", "--info")
 
     def test_subprocess_uses_argv_and_fixed_locale(self):
-        with patch.object(camera.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "ok", "")) as run:
+        with patch.object(camera, "run_bounded", return_value=subprocess.CompletedProcess([], 0, "ok", "")) as run:
             self.assertEqual(camera.v4l2("/dev/a path", "--info"), "ok")
-            self.assertEqual(run.call_args.args[0], ["v4l2-ctl", "--device", "/dev/a path", "--info"])
-            self.assertEqual(run.call_args.kwargs["env"]["LC_ALL"], "C")
+            self.assertEqual(run.call_args.args[0], [camera.trusted_v4l2(), "--device", "/dev/a path", "--info"])
             self.assertNotIn("shell", run.call_args.kwargs)
 
 

@@ -1,9 +1,11 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3 -I
 """Small JSON boundary between the Omarchy widget and v4l2-ctl (no capture)."""
 
 import argparse
 import json
-import os
+import importlib.util
+from itertools import islice
+import time
 from pathlib import Path
 import re
 import subprocess
@@ -11,8 +13,25 @@ import sys
 
 if __package__:
     from .i18n import tr
+    from .process import run_bounded, trusted_v4l2, OutputLimitError
 else:
-    from i18n import tr
+    # -I excludes the script directory from sys.path. Load only these exact
+    # plugin-owned modules; never add a search directory for other imports.
+    def sibling(name):
+        spec = importlib.util.spec_from_file_location(name, Path(__file__).resolve().with_name(name + ".py"))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    tr = sibling("i18n").tr
+    processes = sibling("process")
+    run_bounded, trusted_v4l2, OutputLimitError = processes.run_bounded, processes.trusted_v4l2, processes.OutputLimitError
+
+MAX_CONTROLS = 128
+MAX_OPTIONS = 64
+MAX_FIELD = 512
+MAX_JSON = 512 * 1024
+REQUEST_DEADLINE = None
+LIMIT_MESSAGE = "Camera response exceeded the safety limits."
 
 
 class CameraError(Exception):
@@ -48,25 +67,28 @@ LABELS = {
 
 def v4l2(device, *args):
     try:
-        result = subprocess.run(
-            ["v4l2-ctl", "--device", device, *args],
-            capture_output=True, text=True, timeout=8,
-            env={**os.environ, "LC_ALL": "C"}, check=False,
-        )
+        timeout = min(8, REQUEST_DEADLINE - time.monotonic()) if REQUEST_DEADLINE is not None else 8
+        result = run_bounded([trusted_v4l2(), "--device", device, *args], timeout=timeout)
+    except OutputLimitError as exc:
+        raise CameraError(tr(LIMIT_MESSAGE)) from exc
     except FileNotFoundError as exc:
         raise CameraError(tr("Install v4l-utils: omarchy pkg add v4l-utils")) from exc
     except subprocess.TimeoutExpired as exc:
         raise CameraError(tr("The camera timed out. Reconnect it and try again.")) from exc
     if result.returncode:
-        detail = (result.stderr or result.stdout).strip()
+        detail = (result.stderr or result.stdout).strip()[:1024]
         raise CameraError(tr("Failed on {device}: {detail}", device=device, detail=detail))
     return result.stdout
 
 
 def parse_controls(output):
+    if len(output.encode("utf-8")) > 256 * 1024:
+        raise CameraError(tr(LIMIT_MESSAGE))
     controls = []
     current = None
     for line in output.splitlines():
+        if len(line) > MAX_FIELD:
+            raise CameraError(tr(LIMIT_MESSAGE))
         match = re.match(r"\s*(\w+)\s+0x[0-9a-fA-F]+\s+\(([^)]+)\)\s*:\s*(.*)", line)
         if match:
             name, kind, fields = match.groups()
@@ -83,20 +105,32 @@ def parse_controls(output):
                 and kind.strip() in {"int", "bool", "menu", "intmenu"}
                 and "value" in values,
             }
+            if len(controls) >= MAX_CONTROLS:
+                raise CameraError(tr(LIMIT_MESSAGE))
             controls.append(current)
         elif current:
             option = re.match(r"\s+(-?\d+):\s*(.+)", line)
             if option:
+                if len(current["options"]) >= MAX_OPTIONS:
+                    raise CameraError(tr(LIMIT_MESSAGE))
                 value, label = option.groups()
                 current["options"].append({"value": int(value), "label": tr(label)})
     return controls
 
 
+def read_field(path):
+    with path.open() as stream:
+        value = stream.read(MAX_FIELD + 1)
+    if len(value) > MAX_FIELD:
+        raise CameraError(tr(LIMIT_MESSAGE))
+    return value.strip()
+
+
 def discover():
     devices, errors = [], []
-    for node in sorted(Path("/sys/class/video4linux").glob("video*")):
+    for node in islice(Path("/sys/class/video4linux").glob("video*"), 32):
         try:
-            name = (node / "name").read_text().strip()
+            name = read_field(node / "name")
             if "streamcam" not in name.lower():
                 continue
             # UVC exposes a metadata node as well; it has no video format.
@@ -109,17 +143,20 @@ def discover():
                     continue
             else:
                 v4l2(path, "--get-fmt-video")
-            stable = next((str(p) for p in sorted(Path("/dev/v4l/by-id").glob("*"))
+            stable = next((str(p) for p in islice(Path("/dev/v4l/by-id").glob("*"), 64)
                            if p.resolve() == Path(path)), path)
             usb = node.resolve()
             speed = ""
             for parent in usb.parents:
                 if (parent / "speed").exists():
-                    speed = (parent / "speed").read_text().strip()
+                    speed = read_field(parent / "speed")
                     break
+            if len(stable) > MAX_FIELD:
+                raise CameraError(tr(LIMIT_MESSAGE))
             devices.append({"path": stable, "node": path, "name": name, "usbSpeed": speed})
         except (OSError, CameraError) as exc:
-            errors.append(str(exc))
+            if len(errors) < 8:
+                errors.append(str(exc)[:1024])
     return devices, errors
 
 
@@ -168,7 +205,16 @@ def execute(action, requested="", control_name=None, value=None):
     return state
 
 
+def encode_result(result):
+    encoded = json.dumps(result, ensure_ascii=False)
+    if len(encoded.encode("utf-8")) > MAX_JSON:
+        raise CameraError(tr(LIMIT_MESSAGE))
+    return encoded
+
+
 def main():
+    global REQUEST_DEADLINE
+    REQUEST_DEADLINE = time.monotonic() + 20
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=["inspect", "set", "formats"])
     parser.add_argument("--device", default="")
@@ -178,11 +224,11 @@ def main():
     if args.action == "set" and (not args.control or args.value is None):
         parser.error(tr("set requires --control and --value"))
     try:
-        result = execute(args.action, args.device, args.control, args.value)
+        result = encode_result(execute(args.action, args.device, args.control, args.value))
     except (CameraError, OSError) as exc:
-        print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))
+        print(json.dumps({"ok": False, "error": str(exc)[:1024]}, ensure_ascii=False))
         return 1
-    print(json.dumps(result, ensure_ascii=False))
+    print(result)
     return 0
 
 

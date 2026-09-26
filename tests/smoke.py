@@ -27,11 +27,13 @@ def main():
 import Quickshell
 ShellRoot {
   Widget { id: widget }
+  I18n { id: translations }
   Timer { interval: 300; running: true; onTriggered: widget.open() }
   Timer { interval: 1500; running: true; onTriggered: widget.previewRequested = PREVIEW }
   Timer { interval: 6500; running: true; onTriggered: {
     console.log("CONTROLS_OK", widget.error === "" && widget.cameraState.controls.length > 0)
     console.log("VISIBLE_CONTROLS_OK", widget.visibleControls.length > 0)
+    console.log("LOCALE_OK", widget.cameraState.controls.some(c => c.name === "brightness" && c.label === translations.t("Brightness")))
     console.log("PREVIEW_OK", widget.previewHasFrames, widget.previewError)
     widget.close()
     console.log("CLOSED_OK", !widget.opened && !widget.previewRequested && !widget.previewHasFrames)
@@ -46,7 +48,7 @@ ShellRoot {
         result = subprocess.run(["quickshell", "-p", str(temp), "--no-color"], capture_output=True, text=True, timeout=20)
         output = result.stdout + result.stderr
         print(output)
-        required = ["CONTROLS_OK true", "VISIBLE_CONTROLS_OK true", "CLOSED_OK true", "REOPEN_OK true"]
+        required = ["CONTROLS_OK true", "VISIBLE_CONTROLS_OK true", "LOCALE_OK true", "CLOSED_OK true", "REOPEN_OK true"]
         if args.preview:
             required.append("PREVIEW_OK true")
         if result.returncode or not all(marker in output for marker in required):

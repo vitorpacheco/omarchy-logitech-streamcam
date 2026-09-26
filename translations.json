@@ -64,9 +64,7 @@
     "The camera sent no frames. It may be busy; turn preview off and try again.": "The camera sent no frames. It may be busy; turn preview off and try again.",
     "Preview unavailable": "Preview unavailable",
     "Starting camera…": "Starting camera…",
-    "Missing dependency: {name} (Python and v4l-utils are required).": "Missing dependency: {name} (Python and v4l-utils are required).",
-    "Already exists: {path}. Remove the plugin through Omarchy before reinstalling.": "Already exists: {path}. Remove the plugin through Omarchy before reinstalling.",
-    "StreamCam installed. Click the camera icon in the bar.": "StreamCam installed. Click the camera icon in the bar."
+    "Camera response exceeded the safety limits.": "Camera response exceeded the safety limits."
   },
   "pt": {
     "Image": "Imagem",
@@ -133,8 +131,6 @@
     "The camera sent no frames. It may be busy; turn preview off and try again.": "A câmera não enviou imagens. Ela pode estar ocupada; desligue a prévia e tente novamente.",
     "Preview unavailable": "Prévia indisponível",
     "Starting camera…": "Iniciando câmera…",
-    "Missing dependency: {name} (Python and v4l-utils are required).": "Dependência ausente: {name} (Python e v4l-utils são necessários).",
-    "Already exists: {path}. Remove the plugin through Omarchy before reinstalling.": "Já existe: {path}. Remova pelo Omarchy antes de reinstalar.",
-    "StreamCam installed. Click the camera icon in the bar.": "StreamCam instalada. Clique no ícone de câmera na barra."
+    "Camera response exceeded the safety limits.": "A resposta da câmera excedeu os limites de segurança."
   }
 }
